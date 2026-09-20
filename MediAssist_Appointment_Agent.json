@@ -1,0 +1,1613 @@
+{
+  "name": "MediAssist_Appointment_Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n – Code node\n * Mode : Run Once for All Items\n * Objectif :\n *   1. Repère **gras** ou *gras*\n *   2. Convertit le contenu en lettres \"Unicode Bold\"\n *   3. Supprime tous les astérisques\n */\n\nconst FIELD = 'output'; // ← mets ici le nom exact du champ texte\n\n// --- petite fonction de conversion ASCII → Unicode gras\nfunction toUnicodeBold(str) {\n  const upperOffset = 0x1D400 - 0x41;      // A → 𝐀\n  const lowerOffset = 0x1D41A - 0x61;      // a → 𝐚\n  const digitOffset = 0x1D7CE - 0x30;      // 0 → 𝟎\n\n  return str.split('').map(ch => {\n    const code = ch.charCodeAt(0);\n    if (code >= 0x41 && code <= 0x5A) return String.fromCodePoint(code + upperOffset); // A-Z\n    if (code >= 0x61 && code <= 0x7A) return String.fromCodePoint(code + lowerOffset); // a-z\n    if (code >= 0x30 && code <= 0x39) return String.fromCodePoint(code + digitOffset); // 0-9\n    return ch; // ponctuation, espaces…\n  }).join('');\n}\n\nfor (const item of $input.all()) {\n  if (item.json[FIELD]) {\n    item.json[FIELD] = item.json[FIELD]\n      // ► 1. **…**  ou *…*  → conversion + suppression d’astérisques\n      .replace(/\\*{1,2}([^*]+?)\\*{1,2}/gs, (_, txt) => toUnicodeBold(txt))\n\n      // ► 2. S’il reste des astérisques isolés → on les retire\n      .replace(/\\*/g, '');\n  }\n}\n\nreturn $input.all();"
+      },
+      "id": "4e7d43a4-7fcd-46cf-8133-2deddf4b56c2",
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2368,
+        528
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_prompt }}",
+        "options": {
+          "systemMessage": "=# City Clinic Cal.com Action Agent\n\nYou handle ONLY Cal.com actions for appointment booking, finding, cancelling, and rescheduling. You must never handle issue or complaint messages.\n\nThe menu, doctor selection, slot selection, detail collection, date calculation, and confirmation are handled by deterministic router code before you receive a message.\n\nRules:\n- Plain numbered lists only.\n- No emoji number icons.\n- Never expose tool names or raw JSON to the user.\n- Use timezone Asia/Kolkata for attendee timezone.\n- Use EventTypeId exactly as provided in the command. Do not invent a different eventTypeId.\n- For every booking, set the booking title field as: Appointment with [doctor] - [reason].\n- For every booking, use clinic location: City Clinic, Kota.\n\nCommands:\n\n1. BOOK_APPOINTMENT_CONFIRMED\nThe user has already confirmed the booking. Parse the JSON below the command. Call book_appointment exactly once with:\n- eventTypeId from JSON\n- eventDateTimeUtc from JSON\n- name from JSON\n- email from JSON\n- phoneE164 from JSON\n- doctor from JSON\n- title using exact format: Appointment with [doctor] - [reason]\nAfter the tool succeeds, reply:\nAppointment booked successfully.\n\nDoctor: [doctor]\nDepartment: [department]\nSlot: [slot]\nClinic: City Clinic, Kota\nName: [name]\nPhone: [phoneE164]\n\n2. FIND_BOOKING\nCall find_booking using the provided Email and EventTypeId. Summarize future booking(s). If none found, say no booking was found for that email.\n\n3. CANCEL_BOOKING_START\nCall find_booking using the provided Email and EventTypeId. Show the booking details and ask:\nDo you want to cancel this booking?\n\n1. Yes, cancel it\n2. No\n3. Main Menu\nDo not call cancel_booking until the user confirms.\n\n4. If the previous assistant message asked to cancel and the user replies 1, call cancel_booking using the booking uid from the previous find_booking result. If user replies 2 or 3, do not cancel.\n\n5. RESCHEDULE_BOOKING_START\nCall find_booking using the provided Email and EventTypeId. Show the booking and ask the user to provide the new date and time. Do not call reschedule_booking until user provides a new date/time and confirms.\n\n6. If rescheduling, ask for and confirm the new date/time before calling reschedule_booking.\n\nIf the command is unclear, ask the user to return to the Main Menu.",
+          "maxIterations": 3,
+          "enableStreaming": false
+        }
+      },
+      "id": "ee635cd1-3732-453d-843b-c1ae9ac74716",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        1712,
+        736
+      ],
+      "retryOnFail": true,
+      "typeVersion": 2.2,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.message.chat.id }}-booking-v4",
+        "contextWindowLength": 3
+      },
+      "id": "a20abc83-ffa9-4246-b346-a4225e937c19",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "position": [
+        1536,
+        960
+      ],
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "b976b8b5-32d3-4fe3-8f09-4e427f4cc1f3",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        48,
+        656
+      ],
+      "webhookId": "11d22dfd-d255-402c-8009-ab5b923d4666",
+      "credentials": {
+        "telegramApi": {
+          "id": "h6e5mgr6HcpOpZUD",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "e84e8085-722d-4bdb-8b17-9f6f1a790549",
+      "name": "Telegram Send Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2592,
+        1104
+      ],
+      "webhookId": "2a662bdb-74d3-49be-a1e0-62abdfba1a86",
+      "credentials": {
+        "telegramApi": {
+          "id": "h6e5mgr6HcpOpZUD",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "telegram-user-prompt",
+              "name": "user_prompt",
+              "type": "string",
+              "value": "={{ $json.message.text }}"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "d4b389ca-0282-4542-8e8f-094cd3c9bfa0",
+      "name": "Telegram Text Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 700,
+          "temperature": 0.1
+        }
+      },
+      "id": "a78a2d1e-7fd4-4747-8e05-c7605014d508",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        960
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "PcEEdcYq99r4eEJd",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Check available appointment slots in Cal.com for City Clinic. Always use eventTypeId 7143715 and Asia/Kolkata timezone.",
+        "url": "https://api.cal.com/v2/slots",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "eventTypeId",
+              "value": "7143715"
+            },
+            {
+              "name": "timeZone",
+              "value": "Asia/Kolkata"
+            },
+            {
+              "name": "start",
+              "value": "={{ $fromAI('start', 'YYYY-MM-DD start date', 'string') }}"
+            },
+            {
+              "name": "end",
+              "value": "={{ $fromAI('end', 'YYYY-MM-DD end date', 'string') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cal-api-version",
+              "value": "2024-09-04"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "692ca349-49d3-4a4b-823e-09693049cdd8",
+      "name": "check_availability",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        1664,
+        960
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "mkKFdcfN7yIi4YLn",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Create a City Clinic Cal.com appointment only after deterministic router confirmation. Use eventTypeId 7143715. Use location City Clinic, Kota. For the title booking field, use: Appointment with [doctor] - [reason]. Normalize valid 10-digit Indian mobile numbers to +91 E.164 format before using phoneE164.",
+        "method": "POST",
+        "url": "https://api.cal.com/v2/bookings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cal-api-version",
+              "value": "2024-08-13"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"start\": \"{{ $fromAI('eventDateTimeUtc', 'Confirmed ISO 8601 UTC start time from the router', 'string') }}\",\n  \"eventTypeId\": 7143715,\n  \"location\": {\n    \"type\": \"address\",\n    \"address\": \"City Clinic, Kota\",\n    \"public\": true\n  },\n  \"attendee\": {\n    \"name\": \"{{ $fromAI('name', 'confirmed attendee full name', 'string') }}\",\n    \"email\": \"{{ $fromAI('email', 'confirmed attendee email', 'string') }}\",\n    \"timeZone\": \"Asia/Kolkata\",\n    \"phoneNumber\": \"{{ $fromAI('phoneE164', 'confirmed Indian phone in +91 E.164 format', 'string') }}\",\n    \"language\": \"en\"\n  },\n  \"bookingFieldsResponses\": {\n    \"title\": \"{{ $fromAI('title', 'Use exact format: Appointment with doctor name - appointment reason', 'string') }}\",\n    \"attendeePhoneNumber\": \"{{ $fromAI('phoneE164', 'confirmed Indian phone in +91 E.164 format', 'string') }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "6565d41f-7539-4dfe-9191-be863b5b2977",
+      "name": "book_appointment",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        1792,
+        960
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "mkKFdcfN7yIi4YLn",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Find future Cal.com bookings by attendee email for City Clinic event type 7143715. Return the booking uid, never the email as the uid.",
+        "url": "https://api.cal.com/v2/bookings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "attendeeEmail",
+              "value": "={{ $fromAI('email', 'attendee email', 'string') }}"
+            },
+            {
+              "name": "eventTypeId",
+              "value": "7143715"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cal-api-version",
+              "value": "2024-08-13"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3c83003e-628f-4a5d-ab5a-daadb8296a23",
+      "name": "find_booking",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        1920,
+        960
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "mkKFdcfN7yIi4YLn",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Cancel a Cal.com booking only after finding its booking uid and receiving user confirmation.",
+        "method": "POST",
+        "url": "=https://api.cal.com/v2/bookings/{{ $fromAI('bookingUid', 'Cal.com booking uid', 'string') }}/cancel",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cal-api-version",
+              "value": "2024-08-13"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"cancellationReason\":\"{{ $fromAI('reason', 'cancellation reason', 'string') }}\",\"cancelSubsequentBookings\":{{ $fromAI('cancelAll', 'cancel subsequent bookings true or false', 'boolean') }}}",
+        "options": {}
+      },
+      "id": "8b131f62-b19e-4727-aabe-e1abd2a01403",
+      "name": "cancel_booking",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        2048,
+        960
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "mkKFdcfN7yIi4YLn",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Reschedule a Cal.com booking only after finding its booking uid and receiving user confirmation.",
+        "method": "POST",
+        "url": "=https://api.cal.com/v2/bookings/{{ $fromAI('bookingUid', 'Cal.com booking uid', 'string') }}/reschedule",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cal-api-version",
+              "value": "2024-08-13"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"start\":\"{{ $fromAI('newStartUtc', 'new ISO 8601 UTC start time', 'string') }}\",\"rescheduledBy\":\"{{ $fromAI('actorEmail', 'actor email', 'string') }}\",\"reschedulingReason\":\"{{ $fromAI('reason', 'rescheduling reason', 'string') }}\"}",
+        "options": {}
+      },
+      "id": "811caafd-d5d7-4420-b72c-32c8e74ddb57",
+      "name": "reschedule_booking",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        2176,
+        960
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "mkKFdcfN7yIi4YLn",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LqQpXX-z1UzW2qTzaao8-SP7wvQs1loKJ67XJZ-Sxwc",
+          "cachedResultName": "MediAssist_DB"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "1516948440",
+          "cachedResultName": "Issues"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "TicketId": "={{ $fromAI('ticketId', 'Unique issue ticket id. Use ISS-YYYYMMDD-HHMMSS format.', 'string') }}",
+            "Type": "Issue",
+            "Status": "Open",
+            "Name": "={{ $fromAI('name', 'User full name', 'string') }}",
+            "ContactNumber": "={{ $fromAI('contactNumber', 'User contact number. India +91 is default; normalize valid 10 digit Indian mobile numbers to +91 format.', 'string') }}",
+            "Email": "={{ $fromAI('email', 'User email address', 'string') }}",
+            "Description": "={{ $fromAI('description', 'Confirmed issue description', 'string') }}",
+            "Source": "Telegram",
+            "CreatedAt": "={{ $fromAI('createdAt', 'Current local timestamp in Asia/Kolkata ISO 8601 format', 'string') }}",
+            "UpdatedAt": "={{ $fromAI('updatedAt', 'Same as CreatedAt for a new ticket', 'string') }}"
+          },
+          "schema": [
+            {
+              "id": "TicketId",
+              "displayName": "TicketId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ContactNumber",
+              "displayName": "ContactNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CreatedAt",
+              "displayName": "CreatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "UpdatedAt",
+              "displayName": "UpdatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "locationDefine": {
+            "values": {}
+          },
+          "useAppend": true
+        }
+      },
+      "id": "df57c3c7-f482-4b41-ac39-5b5d90bbbe0d",
+      "name": "save_issue",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1792,
+        464
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5DjH8gjZ88WTp0bk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LqQpXX-z1UzW2qTzaao8-SP7wvQs1loKJ67XJZ-Sxwc",
+          "cachedResultName": "MediAssist_DB"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "693782776",
+          "cachedResultName": "Complaints"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "TicketId": "={{ $fromAI('ticketId', 'Unique complaint ticket id. Use CMP-YYYYMMDD-HHMMSS format.', 'string') }}",
+            "Type": "Complaint",
+            "Status": "Open",
+            "Name": "={{ $fromAI('name', 'User full name', 'string') }}",
+            "ContactNumber": "={{ $fromAI('contactNumber', 'User contact number. India +91 is default; normalize valid 10 digit Indian mobile numbers to +91 format.', 'string') }}",
+            "Email": "={{ $fromAI('email', 'User email address', 'string') }}",
+            "Description": "={{ $fromAI('description', 'Confirmed complaint description', 'string') }}",
+            "Source": "Telegram",
+            "CreatedAt": "={{ $fromAI('createdAt', 'Current local timestamp in Asia/Kolkata ISO 8601 format', 'string') }}",
+            "UpdatedAt": "={{ $fromAI('updatedAt', 'Same as CreatedAt for a new ticket', 'string') }}"
+          },
+          "schema": [
+            {
+              "id": "TicketId",
+              "displayName": "TicketId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ContactNumber",
+              "displayName": "ContactNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CreatedAt",
+              "displayName": "CreatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "UpdatedAt",
+              "displayName": "UpdatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "locationDefine": {
+            "values": {}
+          },
+          "useAppend": true
+        }
+      },
+      "id": "73f878d0-52ba-4a5c-89c8-747bb2a5e95c",
+      "name": "save_complaint",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        464
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5DjH8gjZ88WTp0bk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $fromAI('sendTo', 'The confirmed user Email ID for the issue or complaint confirmation', 'string') }}",
+        "subject": "={{ $fromAI('subject', 'City Clinic ticket confirmation subject with ticket id', 'string') }}",
+        "emailType": "text",
+        "message": "={{ $fromAI('message', 'Plain text ticket confirmation email body including ticket id, type, name, contact, email, description, and 24 hour response note', 'string') }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "953604cb-7611-441c-8d51-ff53bfa9d418",
+      "name": "send_ticket_email",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        2048,
+        464
+      ],
+      "webhookId": "359fd272-14ec-42a4-a7be-c38d9fb448eb",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "jnYD0pTAeHl4wmyx",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const store = $getWorkflowStaticData('global');\nconst VERSION = 'mediassist-v4-deterministic-appointment';\nif (store.__version !== VERSION) {\n  for (const key of Object.keys(store)) delete store[key];\n  store.__version = VERSION;\n}\n\nconst EVENT_TYPE_ID = 7143715;\nconst DEPARTMENTS = ['General Physician', 'Dentist', 'Cardiology', 'Orthopedics', 'Dermatology'];\nconst DOCTORS = {\n  'General Physician': [\n    { id: 'DR001', name: 'Dr. Anjali Mehra', exp: 8, slots: ['Monday 10:00-13:00','Monday 16:00-19:00','Tuesday 10:00-13:00','Tuesday 16:00-19:00','Wednesday 10:00-13:00','Thursday 10:00-13:00','Thursday 16:00-19:00','Friday 10:00-13:00','Friday 16:00-19:00','Saturday 10:00-13:00'] },\n    { id: 'DR002', name: 'Dr. Rakesh Verma', exp: 12, slots: ['Monday 09:00-13:00','Tuesday 09:00-13:00','Tuesday 17:00-20:00','Wednesday 09:00-13:00','Wednesday 17:00-20:00','Thursday 17:00-20:00','Friday 09:00-13:00','Friday 17:00-20:00','Saturday 10:00-14:00'] },\n  ],\n  Dentist: [\n    { id: 'DR003', name: 'Dr. Priya Sharma', exp: 6, slots: ['Monday 11:00-15:00','Wednesday 11:00-15:00','Friday 11:00-15:00','Saturday 10:00-13:00'] },\n    { id: 'DR004', name: 'Dr. Arjun Kapoor', exp: 10, slots: ['Monday 09:00-12:00','Monday 17:00-19:00','Tuesday 09:00-12:00','Wednesday 09:00-12:00','Wednesday 17:00-19:00','Thursday 09:00-12:00','Thursday 17:00-19:00','Friday 09:00-12:00'] },\n  ],\n  Cardiology: [\n    { id: 'DR005', name: 'Dr. Meera Nair', exp: 15, slots: ['Monday 10:00-13:00','Tuesday 10:00-13:00','Thursday 10:00-13:00','Friday 10:00-13:00','Saturday 10:00-12:00'] },\n    { id: 'DR006', name: 'Dr. Vikram Shah', exp: 18, slots: ['Monday 17:00-20:00','Tuesday 17:00-20:00','Wednesday 17:00-20:00','Thursday 17:00-20:00','Friday 17:00-20:00'] },\n  ],\n  Orthopedics: [\n    { id: 'DR007', name: 'Dr. Sneha Iyer', exp: 9, slots: ['Monday 11:00-14:00','Monday 16:00-19:00','Tuesday 11:00-14:00','Wednesday 11:00-14:00','Wednesday 16:00-19:00','Thursday 11:00-14:00','Friday 11:00-14:00','Friday 16:00-19:00'] },\n    { id: 'DR008', name: 'Dr. Kabir Menon', exp: 14, slots: ['Monday 09:00-12:00','Tuesday 09:00-12:00','Tuesday 17:00-20:00','Wednesday 09:00-12:00','Thursday 09:00-12:00','Thursday 17:00-20:00','Friday 09:00-12:00','Saturday 09:00-13:00'] },\n  ],\n  Dermatology: [\n    { id: 'DR009', name: 'Dr. Anita Rao', exp: 7, slots: ['Monday 10:00-13:00','Monday 15:00-18:00','Tuesday 10:00-13:00','Wednesday 10:00-13:00','Wednesday 15:00-18:00','Thursday 10:00-13:00','Friday 10:00-13:00'] },\n    { id: 'DR010', name: 'Dr. Rohan Malhotra', exp: 11, slots: ['Monday 16:00-20:00','Tuesday 16:00-20:00','Thursday 16:00-20:00','Friday 16:00-20:00','Saturday 11:00-15:00'] },\n  ],\n};\nconst DAY_INDEX = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };\n\nfunction greeting() {\n  return 'Hello, welcome to City Clinic, Kota!\\n\\nHow may I help you?\\n\\nPlease select your preferred language.\\nकृपया अपनी पसंदीदा भाषा चुनें।\\n\\n1. English\\n2. Hindi';\n}\nfunction mainMenu(lang) {\n  if (lang === 'hi') return 'मुख्य मेनू\\n\\n1. अपॉइंटमेंट बुक करें\\n2. समस्या उठाएँ\\n3. शिकायत उठाएँ\\n4. बुकिंग खोजें\\n5. बुकिंग रद्द करें\\n6. बुकिंग पुनर्निर्धारित करें\\n7. मुख्य मेनू पर वापस जाएँ\\n\\nकृपया अपना विकल्प 1-7 लिखें।';\n  return 'Main Menu\\n\\n1. Book an Appointment\\n2. Raise an Issue\\n3. Raise a Complaint\\n4. Find Booking\\n5. Cancel Booking\\n6. Reschedule Booking\\n7. Back to Main Menu\\n\\nPlease reply with the number of your choice (1-7).';\n}\nfunction bookStart() {\n  return 'Do you already know the department or doctor you want to visit?\\n\\n1. Yes, I know the department or doctor\\n2. No, help me choose\\n3. Go Back\\n4. Main Menu\\n\\nPlease reply with 1, 2, 3, or 4.';\n}\nfunction deptMenu() {\n  return 'Please select a department:\\n\\n1. General Physician\\n2. Dentist\\n3. Cardiology\\n4. Orthopedics\\n5. Dermatology\\n6. Go Back\\n7. Main Menu\\n\\nPlease reply with 1, 2, 3, 4, 5, 6, or 7.';\n}\nfunction doctorMenu(dept) {\n  const docs = DOCTORS[dept];\n  return `${dept} - Choose a doctor:\\n\\n1. ${docs[0].name} (${docs[0].exp} years experience)\\n2. ${docs[1].name} (${docs[1].exp} years experience)\\n3. Go Back\\n4. Main Menu\\n\\nPlease reply with 1, 2, 3, or 4.`;\n}\nfunction slotMenu(doc) {\n  const lines = doc.slots.map((slot, i) => `${i + 1}. ${slot}`);\n  lines.push(`${doc.slots.length + 1}. Go Back`, `${doc.slots.length + 2}. Main Menu`);\n  return `${doc.name} - Available slots:\\n\\n${lines.join('\\n')}\\n\\nPlease reply with the number of your choice.`;\n}\nfunction detailsPrompt() {\n  return 'To complete the booking, please provide the following details in one message:\\n\\n1. Full name\\n2. Email address\\n3. Phone number\\n4. Reason for the appointment\\n5. Go Back\\n6. Main Menu';\n}\nfunction askSymptoms() {\n  return 'Please describe your symptoms so I can guide you to the right department.\\n\\n1. Go Back\\n2. Main Menu';\n}\nfunction recommendDept(text) {\n  const low = text.toLowerCase();\n  if (/tooth|teeth|gum|cavity|dental|दांत|दाँत/.test(low)) return 'Dentist';\n  if (/chest|heart|bp|blood pressure|pulse|cardio|दिल/.test(low)) return 'Cardiology';\n  if (/bone|joint|knee|back|fracture|shoulder|orthopedic|हड्डी|घुटना|कमर/.test(low)) return 'Orthopedics';\n  if (/skin|rash|acne|itch|allergy|derma|त्वचा|खुजली/.test(low)) return 'Dermatology';\n  return 'General Physician';\n}\nfunction indiaDateParts() {\n  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());\n  const v = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]));\n  return { y: Number(v.year), m: Number(v.month), d: Number(v.day) };\n}\nfunction nextDateFor(dayName) {\n  const p = indiaDateParts();\n  const base = new Date(Date.UTC(p.y, p.m - 1, p.d));\n  const today = base.getUTCDay();\n  let diff = (DAY_INDEX[dayName] - today + 7) % 7;\n  if (diff === 0) diff = 7;\n  base.setUTCDate(base.getUTCDate() + diff);\n  return base.toISOString().slice(0, 10);\n}\nfunction toUtc(date, startTime) {\n  return new Date(`${date}T${startTime}:00+05:30`).toISOString();\n}\nfunction normalizePhone(raw) {\n  const digits = String(raw || '').replace(/\\D/g, '');\n  if (digits.length === 10) return `+91${digits}`;\n  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;\n  if (digits.length === 13 && digits.startsWith('091')) return `+${digits.slice(1)}`;\n  return raw && raw.startsWith('+') ? raw : `+${digits}`;\n}\nfunction parseDetails(text) {\n  const email = (text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i) || [])[0] || '';\n  const phoneRaw = (text.match(/(?:\\+?91[\\s-]?)?[6-9]\\d{9}/) || [])[0] || '';\n  let cleaned = text.replace(email, '').replace(phoneRaw, '');\n  cleaned = cleaned.replace(/name\\s*:/ig, '').replace(/email\\s*:/ig, '').replace(/phone\\s*:/ig, '').replace(/reason\\s*:/ig, '');\n  const lines = cleaned.split(/\\n|,/).map(x => x.trim()).filter(Boolean);\n  const name = lines[0] || '';\n  const reason = lines.slice(1).join(' ') || '';\n  return { name, email, phone: normalizePhone(phoneRaw), reason };\n}\nfunction confirmMessage(a) {\n  return `Please confirm your appointment details:\\n\\nDoctor: ${a.doctor}\\nDepartment: ${a.department}\\nSlot: ${a.slotLabel}\\nName: ${a.name}\\nEmail: ${a.email}\\nPhone: ${a.phone}\\nReason: ${a.reason}\\n\\n1. Confirm Booking\\n2. Edit Details\\n3. Go Back\\n4. Main Menu`;\n}\nfunction resetMain(s) {\n  s.route = 'menu';\n  s.step = 'main';\n  s.appt = {};\n}\nfunction isGreeting(text) {\n  return /^(hi+|hello+|hey+|namaste|नमस्ते|good morning|good evening)$/i.test(text.trim());\n}\nfunction wantsMain(text) {\n  const low = text.toLowerCase();\n  return low === 'main menu' || low === 'menu' || low.includes('मुख्य मेनू');\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const chatId = String(item.json.message?.chat?.id || 'unknown');\n  const text = String(item.json.message?.text || '').trim();\n  const low = text.toLowerCase();\n  let s = store[chatId] || { step: 'idle', lang: 'en', route: 'menu', appt: {} };\n  let route = 'reply';\n  let output = '';\n  let user_prompt = text;\n\n  if (isGreeting(text)) {\n    s = { step: 'language', lang: 'en', route: 'menu', appt: {} };\n    output = greeting();\n  } else if (s.step === 'language') {\n    if (text === '1' || low.includes('english')) {\n      s = { step: 'main', lang: 'en', route: 'menu', appt: {} };\n      output = mainMenu('en');\n    } else if (text === '2' || low.includes('hindi') || low.includes('हिंदी')) {\n      s = { step: 'main', lang: 'hi', route: 'menu', appt: {} };\n      output = mainMenu('hi');\n    } else {\n      output = greeting();\n    }\n  } else if (wantsMain(text)) {\n    resetMain(s);\n    output = mainMenu(s.lang || 'en');\n  } else if (s.step === 'main' || s.route === 'menu') {\n    if (text === '1') {\n      s.route = 'appointment'; s.step = 'book_start'; s.appt = {};\n      output = bookStart();\n    } else if (text === '2' || text === '3') {\n      s.route = 'ticket'; s.step = 'in_ticket';\n      route = 'ticket'; user_prompt = text === '2' ? 'START_ISSUE' : 'START_COMPLAINT';\n    } else if (text === '4') {\n      s.route = 'appointment'; s.step = 'find_email';\n      output = 'Please provide the email address used for the booking.\\n\\n1. Go Back\\n2. Main Menu';\n    } else if (text === '5') {\n      s.route = 'appointment'; s.step = 'cancel_email';\n      output = 'Please provide the email address used for the booking you want to cancel.\\n\\n1. Go Back\\n2. Main Menu';\n    } else if (text === '6') {\n      s.route = 'appointment'; s.step = 'reschedule_email';\n      output = 'Please provide the email address used for the booking you want to reschedule.\\n\\n1. Go Back\\n2. Main Menu';\n    } else {\n      output = mainMenu(s.lang || 'en');\n    }\n  } else if (s.route === 'ticket') {\n    route = 'ticket';\n    user_prompt = text;\n  } else if (s.route === 'appointment') {\n    const a = s.appt || {};\n    if (s.step === 'book_start') {\n      if (text === '1') { s.step = 'dept_select'; output = deptMenu(); }\n      else if (text === '2') { s.step = 'symptoms'; output = askSymptoms(); }\n      else { resetMain(s); output = mainMenu(s.lang || 'en'); }\n    } else if (s.step === 'dept_select') {\n      const idx = Number(text);\n      if (idx >= 1 && idx <= 5) { a.department = DEPARTMENTS[idx - 1]; s.appt = a; s.step = 'doctor_select'; output = doctorMenu(a.department); }\n      else if (text === '6') { s.step = 'book_start'; output = bookStart(); }\n      else { resetMain(s); output = mainMenu(s.lang || 'en'); }\n    } else if (s.step === 'symptoms') {\n      if (text === '1') { s.step = 'book_start'; output = bookStart(); }\n      else if (text === '2') { resetMain(s); output = mainMenu(s.lang || 'en'); }\n      else { a.department = recommendDept(text); s.appt = a; s.step = 'recommend_confirm'; output = `Based on your symptoms, I recommend ${a.department}.\\n\\nDo you want to proceed with this department?\\n\\n1. Yes\\n2. No\\n3. Go Back\\n4. Main Menu`; }\n    } else if (s.step === 'recommend_confirm') {\n      if (text === '1') { s.step = 'doctor_select'; output = doctorMenu(a.department); }\n      else if (text === '2') { s.step = 'dept_select'; output = deptMenu(); }\n      else if (text === '3') { s.step = 'symptoms'; output = askSymptoms(); }\n      else { resetMain(s); output = mainMenu(s.lang || 'en'); }\n    } else if (s.step === 'doctor_select') {\n      const docs = DOCTORS[a.department] || [];\n      if (text === '1' || text === '2') { const doc = docs[Number(text) - 1]; a.doctor = doc.name; a.doctorId = doc.id; a.doctorIndex = Number(text) - 1; s.appt = a; s.step = 'slot_select'; output = slotMenu(doc); }\n      else if (text === '3') { s.step = 'dept_select'; output = deptMenu(); }\n      else { resetMain(s); output = mainMenu(s.lang || 'en'); }\n    } else if (s.step === 'slot_select') {\n      const doc = (DOCTORS[a.department] || [])[a.doctorIndex];\n      const idx = Number(text);\n      if (doc && idx >= 1 && idx <= doc.slots.length) {\n        const slot = doc.slots[idx - 1];\n        const [day, timeRange] = slot.split(' ');\n        const startTime = timeRange.split('-')[0];\n        const date = nextDateFor(day);\n        a.slot = slot; a.slotLabel = `${day} ${date} ${timeRange}`; a.date = date; a.startTime = startTime; a.eventDateTimeUtc = toUtc(date, startTime);\n        s.appt = a; s.step = 'details'; output = detailsPrompt();\n      } else if (doc && idx === doc.slots.length + 1) { s.step = 'doctor_select'; output = doctorMenu(a.department); }\n      else { resetMain(s); output = mainMenu(s.lang || 'en'); }\n    } else if (s.step === 'details') {\n      if (text === '5') { s.step = 'slot_select'; const doc = (DOCTORS[a.department] || [])[a.doctorIndex]; output = slotMenu(doc); }\n      else if (text === '6') { resetMain(s); output = mainMenu(s.lang || 'en'); }\n      else {\n        const d = parseDetails(text);\n        Object.assign(a, d);\n        s.appt = a;\n        if (!a.name || !a.email || !a.phone || !a.reason) output = `I could not read all details clearly. Please send full name, email address, phone number, and reason in one message.\\n\\n5. Go Back\\n6. Main Menu`;\n        else { s.step = 'confirm_booking'; output = confirmMessage(a); }\n      }\n    } else if (s.step === 'confirm_booking') {\n      if (text === '1') {\n        route = 'appointment';\n        user_prompt = `BOOK_APPOINTMENT_CONFIRMED\\n${JSON.stringify({ eventTypeId: EVENT_TYPE_ID, doctorId: a.doctorId, doctor: a.doctor, department: a.department, slot: a.slotLabel, eventDateTimeUtc: a.eventDateTimeUtc, name: a.name, email: a.email, phoneE164: a.phone, reason: a.reason }, null, 2)}`;\n        resetMain(s);\n      } else if (text === '2') { s.step = 'details'; output = detailsPrompt(); }\n      else if (text === '3') { s.step = 'slot_select'; const doc = (DOCTORS[a.department] || [])[a.doctorIndex]; output = slotMenu(doc); }\n      else { resetMain(s); output = mainMenu(s.lang || 'en'); }\n    } else if (s.step === 'find_email') {\n      if (text === '1' || text === '2') { resetMain(s); output = mainMenu(s.lang || 'en'); }\n      else { route = 'appointment'; user_prompt = `FIND_BOOKING\\nEmail: ${text}\\nEventTypeId: ${EVENT_TYPE_ID}`; resetMain(s); }\n    } else if (s.step === 'cancel_email') {\n      if (text === '1' || text === '2') { resetMain(s); output = mainMenu(s.lang || 'en'); }\n      else { route = 'appointment'; user_prompt = `CANCEL_BOOKING_START\\nEmail: ${text}\\nEventTypeId: ${EVENT_TYPE_ID}\\nFind the booking and ask the user to confirm before cancelling.`; s.step = 'cancel_ai'; }\n    } else if (s.step === 'reschedule_email') {\n      if (text === '1' || text === '2') { resetMain(s); output = mainMenu(s.lang || 'en'); }\n      else { route = 'appointment'; user_prompt = `RESCHEDULE_BOOKING_START\\nEmail: ${text}\\nEventTypeId: ${EVENT_TYPE_ID}\\nFind the booking and ask the user for the new slot before rescheduling.`; s.step = 'reschedule_ai'; }\n    } else if (s.step === 'cancel_ai' || s.step === 'reschedule_ai') {\n      route = 'appointment'; user_prompt = text;\n    } else {\n      resetMain(s); output = mainMenu(s.lang || 'en');\n    }\n  } else {\n    resetMain(s);\n    output = mainMenu(s.lang || 'en');\n  }\n\n  store[chatId] = s;\n  out.push({ json: { ...item.json, route, output, user_prompt, selectedLanguage: s.lang || 'en' } });\n}\nreturn out;"
+      },
+      "id": "ticket-state-handler",
+      "name": "Ticket State Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.handled }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ticket-handled-if",
+      "name": "Ticket Handled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "ticket_ready",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ticket-ready-if",
+      "name": "Ticket Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        976,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.Type }}",
+              "rightValue": "Issue",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ticket-is-issue-if",
+      "name": "Ticket Is Issue?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1216,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LqQpXX-z1UzW2qTzaao8-SP7wvQs1loKJ67XJZ-Sxwc",
+          "cachedResultName": "MediAssist_DB"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "1516948440",
+          "cachedResultName": "Issues"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "TicketId": "={{ $json.TicketId }}",
+            "Type": "={{ $json.Type }}",
+            "Status": "={{ $json.Status }}",
+            "Name": "={{ $json.Name }}",
+            "ContactNumber": "={{ $json.ContactNumber }}",
+            "Email": "={{ $json.Email }}",
+            "Description": "={{ $json.Description }}",
+            "Source": "={{ $json.Source }}",
+            "CreatedAt": "={{ $json.CreatedAt }}",
+            "UpdatedAt": "={{ $json.UpdatedAt }}"
+          },
+          "schema": [
+            {
+              "id": "TicketId",
+              "displayName": "TicketId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ContactNumber",
+              "displayName": "ContactNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CreatedAt",
+              "displayName": "CreatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "UpdatedAt",
+              "displayName": "UpdatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "useAppend": true
+        }
+      },
+      "id": "save-issue-row",
+      "name": "Save Issue Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1552,
+        1392
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5DjH8gjZ88WTp0bk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LqQpXX-z1UzW2qTzaao8-SP7wvQs1loKJ67XJZ-Sxwc",
+          "cachedResultName": "MediAssist_DB"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "693782776",
+          "cachedResultName": "Complaints"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "TicketId": "={{ $json.TicketId }}",
+            "Type": "={{ $json.Type }}",
+            "Status": "={{ $json.Status }}",
+            "Name": "={{ $json.Name }}",
+            "ContactNumber": "={{ $json.ContactNumber }}",
+            "Email": "={{ $json.Email }}",
+            "Description": "={{ $json.Description }}",
+            "Source": "={{ $json.Source }}",
+            "CreatedAt": "={{ $json.CreatedAt }}",
+            "UpdatedAt": "={{ $json.UpdatedAt }}"
+          },
+          "schema": [
+            {
+              "id": "TicketId",
+              "displayName": "TicketId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ContactNumber",
+              "displayName": "ContactNumber",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CreatedAt",
+              "displayName": "CreatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "UpdatedAt",
+              "displayName": "UpdatedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "useAppend": true
+        }
+      },
+      "id": "save-complaint-row",
+      "name": "Save Complaint Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1552,
+        1568
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5DjH8gjZ88WTp0bk",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Ticket State Handler').item.json.Email }}",
+        "subject": "={{ $('Ticket State Handler').item.json.emailSubject }}",
+        "emailType": "text",
+        "message": "={{ $('Ticket State Handler').item.json.emailBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "send-ticket-email-direct",
+      "name": "Send Ticket Email Direct",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1872,
+        1472
+      ],
+      "webhookId": "f0bef2f2-cb2f-498d-9363-2d6d64183080",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "jnYD0pTAeHl4wmyx",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Ticket State Handler').first().json;\nreturn [{ json: { output: src.finalMessage || src.output || 'Ticket has been raised.' } }];"
+      },
+      "id": "ticket-final-output",
+      "name": "Ticket Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "ticket",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-is-ticket",
+      "name": "Route Is Ticket?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "appointment",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-is-appointment",
+      "name": "Route Is Appointment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1168,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_prompt }}",
+        "options": {
+          "systemMessage": "=# City Clinic Issue/Complaint Assistant\n\nYou handle ONLY Raise an Issue and Raise a Complaint. Do not book appointments. Use selected language from input selectedLanguage; if hi use Hindi, otherwise English. Plain numbered lists only. No emoji number icons. Never expose tools.\n\nSTART_ISSUE means start issue flow. START_COMPLAINT means start complaint flow.\n\nFlow:\n1. Ask details:\nPlease provide your details:\n\n1. Name\n2. Contact Number\n3. Email ID\n4. Go Back\n5. Main Menu\n\nHindi:\nकृपया अपने विवरण प्रदान करें:\n\n1. नाम\n2. संपर्क नंबर\n3. ईमेल आईडी\n4. वापस जाएँ\n5. मुख्य मेनू\n\nAccept all details in one message. India default phone: if 10 digits, normalize to +91XXXXXXXXXX.\n\n2. Ask description:\nPlease describe your issue/complaint.\n\n1. Go Back\n2. Main Menu\n\nHindi: कृपया अपनी समस्या/शिकायत का विवरण दें।\n\n1. वापस जाएँ\n2. मुख्य मेनू\n\n3. Show confirmation only. Do not call tools yet:\nPlease confirm the issue/complaint details:\n\nType: Issue/Complaint\nName: [name]\nContact: [contact]\nEmail: [email]\nDescription: [description]\n\n1. Confirm\n2. Edit Details\n3. Go Back\n4. Main Menu\n\n4. Only when user confirms with 1, generate ticket id ISS-YYYYMMDD-HHMMSS for issue or CMP-YYYYMMDD-HHMMSS for complaint. Call save_issue or save_complaint exactly once, then call send_ticket_email exactly once, then return the final chat message. Do not call tools again after email.\n\nFinal chat:\nIssue has been raised.\n\nYour Issue Id: [ticketId]\nName: [name]\nContact: [contact]\n\nThank you for raising the issue.\nOur team will reach out to you within 24 hours.\n\nFor complaint say Complaint has been raised and Your Complaint Id.\n\nHindi final:\nसमस्या/शिकायत दर्ज कर दी गई है।\n\nआपका Issue/Complaint Id: [ticketId]\nनाम: [name]\nसंपर्क: [contact]\n\nधन्यवाद। हमारी टीम 24 घंटे के भीतर आपसे संपर्क करेगी.",
+          "maxIterations": 4,
+          "enableStreaming": false
+        }
+      },
+      "id": "issue-ai-agent",
+      "name": "Issue Complaint AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1712,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 600,
+          "temperature": 0.1
+        }
+      },
+      "id": "issue-groq-chat-model",
+      "name": "Issue Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        464
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "PcEEdcYq99r4eEJd",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.message.chat.id }}-issue-v1",
+        "contextWindowLength": 4
+      },
+      "id": "issue-simple-memory",
+      "name": "Issue Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1664,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const greetingPattern = /^(\\/start(?:@\\w+)?|hi+|hello+|hey+|namaste|नमस्ते|good morning|good evening)[\\s.!?]*$/i;\n\nreturn $input.all().map((item) => {\n  const message = item.json.message;\n  const text = String(message?.text || '').trim();\n\n  if (message && greetingPattern.test(text)) {\n    message.text = 'hi';\n    item.json.user_prompt = 'hi';\n    item.json.resetGreeting = true;\n  }\n\n  return item;\n});"
+      },
+      "id": "92d4fb87-3ad9-4afe-8d12-032342a35d20",
+      "name": "Normalize Start Greeting",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        656
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Telegram Text Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "book_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancel_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reschedule_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "save_issue": {
+      "ai_tool": [
+        [
+          {
+            "node": "Issue Complaint AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "save_complaint": {
+      "ai_tool": [
+        [
+          {
+            "node": "Issue Complaint AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send_ticket_email": {
+      "ai_tool": [
+        [
+          {
+            "node": "Issue Complaint AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Handled?": {
+      "main": [
+        [
+          {
+            "node": "Ticket Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Ready?": {
+      "main": [
+        [
+          {
+            "node": "Ticket Is Issue?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Is Issue?": {
+      "main": [
+        [
+          {
+            "node": "Save Issue Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Complaint Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Issue Row": {
+      "main": [
+        [
+          {
+            "node": "Send Ticket Email Direct",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Complaint Row": {
+      "main": [
+        [
+          {
+            "node": "Send Ticket Email Direct",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Ticket Email Direct": {
+      "main": [
+        [
+          {
+            "node": "Ticket Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Final Output": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket State Handler": {
+      "main": [
+        [
+          {
+            "node": "Route Is Ticket?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Is Ticket?": {
+      "main": [
+        [
+          {
+            "node": "Issue Complaint AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route Is Appointment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Is Appointment?": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Complaint AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Issue Complaint AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Issue Complaint AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Text Input": {
+      "main": [
+        [
+          {
+            "node": "Normalize Start Greeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Start Greeting": {
+      "main": [
+        [
+          {
+            "node": "Ticket State Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "48ef7991-2628-4084-b4b0-a885ede2c719",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "00b78f1489971860d5dccbc6dc6cfb640680bc8d8aa9fb58c0c8f06eb124b73b"
+  },
+  "nodeGroups": [],
+  "id": "n2XzwvywO5u73xTZ",
+  "tags": []
+}
